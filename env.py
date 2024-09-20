@@ -1,6 +1,6 @@
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium.spaces import Box
 
 from kinematics.planar_arm import PlanarArm
 
@@ -107,17 +107,26 @@ class GymReachingEnvironment(gym.Env):
         self.env = ReachingEnvironment(arm, init_thetas, radians)
 
         # Define action and observation space
-        self.action_space = spaces.Box(low=-np.radians(10), high=np.radians(10), shape=(2,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
+        self.action_space = Box(low=-np.radians(10), high=np.radians(10), shape=(2,), dtype=np.float32)
+        self.observation_space = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
         self.env.new_target()
-        return self.env.reset()
+        observation = self.env.reset()
+        return observation, {}  # Return observation and an empty info dict
 
     def step(self, action):
-        # TODO: fill info dict?
-        observation, reward, done = self.env.step(action)
-        return observation, reward, done, {}
+        observation, reward, done = self.env.step(action, max_angle_change=np.radians(10))
+
+        # In Gymnasium, we need to include a "truncated" boolean
+        # For simplicity, we'll set it to False always
+        truncated = False
+
+        # Create an info dict (empty for now, but you can add relevant info here)
+        info = {}
+
+        return observation, reward, done, truncated, info
 
     def render(self, mode='human'):
         pass
@@ -126,3 +135,10 @@ class GymReachingEnvironment(gym.Env):
 if __name__ == '__main__':
     env = GymReachingEnvironment()
     print(env.observation_space)
+    state = env.reset()
+    for _ in range(500):
+        action = np.random.uniform(low=-np.radians(10), high=np.radians(10), size=(2,))
+        state, reward, done, tunc, info = env.step(action)
+        print(reward, done)
+        if done:
+            break
