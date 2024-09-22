@@ -3,6 +3,7 @@ import gymnasium as gym
 from gymnasium.spaces import Box
 
 from kinematics.planar_arm import PlanarArm
+from utils import gaussian_reward
 
 
 def generate_random_target(
@@ -55,8 +56,11 @@ class ReachingEnvironment:
 
         self.arm = arm
         self.current_thetas = self.init_thetas.copy()
+        self.current_pos = PlanarArm.forward_kinematics(self.arm, self.current_thetas, radians=True)[:, -1]
+
         self.target_thetas, self.target_pos = None, None
-        self.max_distance = PlanarArm.upper_arm_length + PlanarArm.forearm_length
+        # modulates the reward function
+        self.max_distance = 50.
 
     def new_target(self, clip_borders_theta: float = np.radians(0.0)):
         self.init_thetas = self.current_thetas.copy()
@@ -65,8 +69,13 @@ class ReachingEnvironment:
                                                                      normalize_xy=True,
                                                                      clip_borders_theta=clip_borders_theta)
 
+    def update_position(self):
+        self.current_pos = PlanarArm.forward_kinematics(self.arm, self.current_thetas, radians=True, check_limits=False)[:, -1]
+        return self.current_pos
+
     def reset(self):
         self.current_thetas = self.init_thetas.copy()
+        self.update_position()
         return np.concatenate([self.current_thetas, self.target_pos])
 
     def step(self,
@@ -85,13 +94,15 @@ class ReachingEnvironment:
         new_pos = PlanarArm.forward_kinematics(self.arm, new_thetas, radians=True, check_limits=False)[:, -1]
 
         # Calculate reward
+        # TODO: Find better reward function
         distance = np.linalg.norm(new_pos - self.target_pos)
-        reward = 1.0 - (distance / self.max_distance)
+        reward = gaussian_reward(distance, sigma=self.max_distance)
         # reward smoother actions
         reward += 0.1 * (1.0 - np.sum(np.abs(action)) / (2 * max_angle_change))
         done = distance < 10  # 10mm threshold
 
         self.current_thetas = new_thetas
+        self.update_position()
         return np.concatenate([new_thetas, self.target_pos]), reward, done
 
 
@@ -110,13 +121,29 @@ class GymReachingEnvironment(gym.Env):
         self.action_space = Box(low=-np.radians(10), high=np.radians(10), shape=(2,), dtype=np.float32)
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
 
+        self.num_steps = 0
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        # set new target
         self.env.new_target()
+        self.num_steps = 0
+
         observation = self.env.reset()
-        return observation, {}  # Return observation and an empty info dict
+
+        # Create an info dict (empty for now, but you can add relevant info here)
+        info = {
+            'num_steps': self.num_steps,
+            'error': np.linalg.norm(self.env.target_pos - self.env.current_pos),
+            'target_pos': self.env.target_pos,
+            'current_pos': self.env.current_pos,
+            'success': False
+        }
+
+        return observation, info
 
     def step(self, action):
+        self.num_steps += 1
         observation, reward, done = self.env.step(action, max_angle_change=np.radians(10))
 
         # In Gymnasium, we need to include a "truncated" boolean
@@ -124,11 +151,18 @@ class GymReachingEnvironment(gym.Env):
         truncated = False
 
         # Create an info dict (empty for now, but you can add relevant info here)
-        info = {}
+        info = {
+            'num_steps': self.num_steps,
+            'error': np.linalg.norm(self.env.target_pos - self.env.current_pos),
+            'target_pos': self.env.target_pos,
+            'current_pos': self.env.current_pos,
+            'success': True if done else False
+        }
 
         return observation, reward, done, truncated, info
 
     def render(self, mode='human'):
+        # TODO: Implement animation
         pass
 
 
@@ -136,9 +170,9 @@ if __name__ == '__main__':
     env = GymReachingEnvironment()
     print(env.observation_space)
     state = env.reset()
-    for _ in range(500):
+    for _ in range(10_000):
         action = np.random.uniform(low=-np.radians(10), high=np.radians(10), size=(2,))
-        state, reward, done, tunc, info = env.step(action)
-        print(reward, done)
+        state, reward, done, trunc, info = env.step(action)
+        print(reward, done, info['success'])
         if done:
             break
