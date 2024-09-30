@@ -1,6 +1,8 @@
 import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Box
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 from kinematics.planar_arm import PlanarArm
 from utils import gaussian_reward
@@ -161,18 +163,50 @@ class GymReachingEnvironment(gym.Env):
 
         return observation, reward, done, truncated, info
 
-    def render(self, mode='human'):
-        # TODO: Implement animation
-        pass
+    def render(self):
+        if not hasattr(self, 'fig'):
+            self.fig, self.ax = plt.subplots(figsize=(8, 8))
+            self.ax.set_xlim(PlanarArm.x_limits)
+            self.ax.set_ylim(PlanarArm.y_limits)
+            self.ax.set_aspect('equal')
+            self.ax.grid(True)
+            self.line, = self.ax.plot([], [], 'o-', lw=2)
+            self.target, = self.ax.plot([], [], 'r*', markersize=10)
+
+        # Get current arm position
+        arm_positions = PlanarArm.forward_kinematics(self.env.arm, self.env.current_thetas, radians=True, check_limits=False)
+
+        # Update arm line
+        x_data = arm_positions[0].tolist()
+        y_data = arm_positions[1].tolist()
+        self.line.set_data(x_data, y_data)
+
+        # Update target position
+        target_x = self.env.target_pos[0] * (PlanarArm.x_limits[1] - PlanarArm.x_limits[0]) + PlanarArm.x_limits[0]
+        target_y = self.env.target_pos[1] * (PlanarArm.y_limits[1] - PlanarArm.y_limits[0]) + PlanarArm.y_limits[0]
+        self.target.set_data([target_x], [target_y])
+
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        plt.pause(0.05)
+
+    def close(self):
+        if hasattr(self, 'fig'):
+            plt.close(self.fig)
+            del self.fig
 
 
 if __name__ == '__main__':
     env = GymReachingEnvironment()
     print(env.observation_space)
-    state = env.reset()
-    for _ in range(10_000):
+    state, _ = env.reset()
+    env.render()
+    for _ in range(100):
         action = np.random.uniform(low=-np.radians(10), high=np.radians(10), size=(2,))
         state, reward, done, trunc, info = env.step(action)
+        env.render()
         print(reward, done, info['success'])
         if done:
             break
+
+    env.close()

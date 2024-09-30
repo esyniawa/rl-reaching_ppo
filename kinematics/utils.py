@@ -1,7 +1,7 @@
 import numpy as np
 
 
-# Create a rotation and translation matrix based on DH parameters
+# Creates a rotation and translation matrix based on DH parameters
 def create_dh_matrix(theta, alpha, a, d, radians=True):
     if not radians:
         alpha = np.radians(alpha)
@@ -16,7 +16,7 @@ def create_dh_matrix(theta, alpha, a, d, radians=True):
     return A
 
 
-# Create a Jacobi Matrix based on DH parameters for inverse kinematic through gradient descent
+# Create a Jacobi Matrix based on DH parameters for inverse kinematics through gradient descent
 def create_jacobian(thetas,
                     a_sh,
                     a_el,

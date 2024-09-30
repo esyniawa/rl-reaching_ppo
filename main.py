@@ -123,8 +123,8 @@ if __name__ == '__main__':
     sim_parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], default='cpu',
                             help='Device to run the model on (cuda or cpu)')
     sim_parser.add_argument('--num_training_trials', type=int, default=1_000,)
-    sim_parser.add_argument('--num_episodes', type=int, default=10_000,)
-    sim_parser.add_argument('--hidden_layer_size', type=int, default=64,)
+    sim_parser.add_argument('--num_episodes', type=int, default=1_000,)
+    sim_parser.add_argument('--hidden_layer_size', type=int, default=128,)
     sim_parser.add_argument('--plot_test_errors', type=bool, default=True,)
     sim_args = sim_parser.parse_args()
 
@@ -194,8 +194,8 @@ if __name__ == '__main__':
         max_epoch=sim_args.num_training_trials,
         step_per_epoch=sim_args.num_episodes,
         repeat_per_collect=10,
-        batch_size=64,
-        step_per_collect=sim_args.num_episodes // 10  # divide through the total number of "workers"
+        batch_size=128,
+        step_per_collect=200  # divide through the total number of "workers"
     )
 
     # test policy
