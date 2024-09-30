@@ -196,6 +196,41 @@ class GymReachingEnvironment(gym.Env):
             del self.fig
 
 
+def create_animation(env: GymReachingEnvironment, policy, max_steps: int = 500, filename: str = 'reaching_animation.mp4'):
+    obs, _ = env.reset()
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xlim(PlanarArm.x_limits)
+    ax.set_ylim(PlanarArm.y_limits)
+    ax.set_aspect('equal')
+    ax.grid(True)
+    line, = ax.plot([], [], 'o-', lw=2)
+    target, = ax.plot([], [], 'r*', markersize=10)
+
+    def animate(i):
+        if i > 0:
+            nonlocal obs
+            action = policy.forward(obs)[0]
+            obs, _, done, _, _ = env.step(action)
+            if done:
+                return line, target
+
+        arm_positions = PlanarArm.forward_kinematics(env.env.arm, env.env.current_thetas, radians=True)
+        x_data = arm_positions[0].tolist()
+        y_data = arm_positions[1].tolist()
+        line.set_data(x_data, y_data)
+
+        target_x = env.env.target_pos[0] * (PlanarArm.x_limits[1] - PlanarArm.x_limits[0]) + PlanarArm.x_limits[0]
+        target_y = env.env.target_pos[1] * (PlanarArm.y_limits[1] - PlanarArm.y_limits[0]) + PlanarArm.y_limits[0]
+        target.set_data([target_x], [target_y])
+
+        return line, target
+
+    anim = FuncAnimation(fig, animate, frames=max_steps, interval=50, blit=True)
+    anim.save(filename, writer='ffmpeg', fps=30)
+    plt.close(fig)
+
+
 if __name__ == '__main__':
     env = GymReachingEnvironment()
     print(env.observation_space)

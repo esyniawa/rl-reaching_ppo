@@ -9,13 +9,17 @@ from tianshou.utils.net.continuous import ActorProb, Critic
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
+from tianshou.utils import TensorboardLogger
+from tianshou.utils.logger.base import LOG_DATA_TYPE
+
 from torch.distributions import Independent, Normal
 import numpy as np
 import matplotlib.pyplot as plt
 from os import path, makedirs
 import argparse
+import pprint
 
-from env import GymReachingEnvironment
+from env import GymReachingEnvironment, create_animation
 print(f'tianshou version: {ts.__version__}')
 
 
@@ -26,8 +30,18 @@ def train_policy(
         step_per_epoch: int,
         repeat_per_collect: int | None,  # set to None for off-policy algorithms
         batch_size: int,
-        step_per_collect: int
+        step_per_collect: int,
+        watcher: bool = True
 ):
+
+    # Set up the logger
+    log_path = f'log/Reaching/{policy.__class__.__name__}'
+    writer = SummaryWriter(log_path)
+    logger = TensorboardLogger(writer)
+
+    def save_best_fn(policy):
+        torch.save(policy.state_dict(), f'{log_path}/ppo_policy.pth')
+
     # initialize trainer with policy
     trainer = OnpolicyTrainer(
         policy=policy,
@@ -39,12 +53,18 @@ def train_policy(
         repeat_per_collect=repeat_per_collect,
         episode_per_test=5,
         batch_size=batch_size,
-        save_best_fn=lambda policy: torch.save(policy.state_dict(), 'ppo_policy.pth'),
-        logger=ts.utils.TensorboardLogger(SummaryWriter(f'log/{policy.__class__.__name__}')),
+        save_best_fn=save_best_fn,
+        logger=logger,
+        verbose=True,  # This enables the progress bar
+        test_in_train=False,  # Set to True if you want to run tests during training
     )
 
     # Start training
     result = trainer.run()
+    pprint.pprint(result)
+
+    if watcher:
+        policy.eval()
 
     # Save the best policy
     folder = 'results/best_policies/'
@@ -123,17 +143,21 @@ if __name__ == '__main__':
     sim_parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], default='cpu',
                             help='Device to run the model on (cuda or cpu)')
     sim_parser.add_argument('--num_training_trials', type=int, default=1_000,)
+    sim_parser.add_argument('--num_test_trials', type=int, default=100,)
     sim_parser.add_argument('--num_episodes', type=int, default=1_000,)
+    sim_parser.add_argument("--buffer-size", type=int, default=4096)
     sim_parser.add_argument('--hidden_layer_size', type=int, default=128,)
+    sim_parser.add_argument('--batch_size', type=int, default=128,)
     sim_parser.add_argument('--plot_test_errors', type=bool, default=True,)
+    sim_parser.add_argument('--animate', type=bool, default=True,)
     sim_args = sim_parser.parse_args()
 
     device = torch.device(sim_args.device if torch.cuda.is_available() and sim_args.device == 'cuda' else 'cpu')
     print(f'device: {device}')
 
     # Create a vector of environments
-    train_envs = DummyVectorEnv([lambda: GymReachingEnvironment() for _ in range(10)])
-    test_envs = DummyVectorEnv([lambda: GymReachingEnvironment() for _ in range(3)])
+    train_envs = DummyVectorEnv([lambda: GymReachingEnvironment(arm=sim_args.arm) for _ in range(10)])
+    test_envs = DummyVectorEnv([lambda: GymReachingEnvironment(arm=sim_args.arm) for _ in range(3)])
 
     # Set up the state shape and action shape
     state_shape = train_envs.observation_space[0].shape[0]
@@ -154,9 +178,8 @@ if __name__ == '__main__':
     # Create the PPO policy
     optim = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=3e-4)
 
-    def dist(logits):
-        mean, log_std = logits
-        return Independent(Normal(mean, log_std.exp()), 1)
+    def dist(loc, scale):
+        return Independent(Normal(loc, scale), 1)
 
 
     # Create the PPO policy
@@ -166,7 +189,7 @@ if __name__ == '__main__':
         optim=optim,
         dist_fn=dist,
         action_space=train_envs.action_space[0],
-        action_bound_method=None,  # Changed from "clip" to None
+        action_bound_method="clip",  # Changed from "clip" to None
         action_scaling=False,  # Disabled action scaling
         discount_factor=0.99,
         max_grad_norm=0.5,
@@ -182,10 +205,10 @@ if __name__ == '__main__':
     )
 
     # Set up the replay buffer
-    buffer = VectorReplayBuffer(sim_args.num_episodes, len(train_envs))
+    buffer = VectorReplayBuffer(sim_args.buffer_size, len(train_envs))
 
     # Create collectors for training and testing
-    train_collector = Collector(policy, train_envs, buffer)
+    train_collector = Collector(policy, train_envs, buffer, exploration_noise=True)
     test_collector = Collector(policy, test_envs)
 
     # Run the training
@@ -194,7 +217,7 @@ if __name__ == '__main__':
         max_epoch=sim_args.num_training_trials,
         step_per_epoch=sim_args.num_episodes,
         repeat_per_collect=10,
-        batch_size=128,
+        batch_size=sim_args.batch_size,
         step_per_collect=200  # divide through the total number of "workers"
     )
 
@@ -202,9 +225,14 @@ if __name__ == '__main__':
     avg_reward, avg_steps, success_rate, errors = evaluate_policy(
         policy=policy,
         save_folder='test_runs/',
-        num_trials=50,
+        num_trials=sim_args.num_test_trials,
         track_error_per_trial=True
     )
+
+    # print results
+    print(f'Average reward: {avg_reward}')
+    print(f'Average steps: {avg_steps}')
+    print(f'Success rate: {success_rate}')
 
     # plot errors
     if sim_args.plot_test_errors:
@@ -217,6 +245,6 @@ if __name__ == '__main__':
             makedirs('results/')
         plt.savefig(f'results/{policy.__class__.__name__}_error_per_trial.pdf')
 
-    # Print the results
-    print(f'Finished training! Used {result.duration}')
-    print(f'Best reward: {result.best_reward}')
+    if sim_args.animate:
+        ani_env = GymReachingEnvironment(arm=sim_args.arm)
+        create_animation(env=ani_env, policy=policy, max_steps=500, filename=f'results/{policy.__class__.__name__}_reaching_animation.mp4')
