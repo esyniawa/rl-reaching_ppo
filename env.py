@@ -124,6 +124,7 @@ class GymReachingEnvironment(gym.Env):
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
 
         self.num_steps = 0
+        self.reward_threshold = 0.95  # Define a reward threshold for "solving" the environment
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -142,7 +143,7 @@ class GymReachingEnvironment(gym.Env):
             'success': False
         }
 
-        return observation, info
+        return observation.astype(np.float32), info
 
     def step(self, action):
         self.num_steps += 1
@@ -161,7 +162,7 @@ class GymReachingEnvironment(gym.Env):
             'success': True if done else False
         }
 
-        return observation, reward, done, truncated, info
+        return observation.astype(np.float32), reward, done, truncated, info
 
     def render(self):
         if not hasattr(self, 'fig'):

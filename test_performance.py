@@ -144,6 +144,7 @@ def test_ppo(args=get_args()):
         stop_fn=stop_fn,
         save_best_fn=save_best_fn,
         logger=logger,
+        show_progress=True,
     ).run()
 
     pprint.pprint(result)
